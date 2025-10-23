@@ -283,7 +283,7 @@ Live Hosts:
             try:
                 r = requests.get(url, timeout=10, verify=False)
                 
-                # check headers for tech
+                
                 headers = r.headers
                 server = headers.get('Server', '').lower()
                 xpowered = headers.get('X-Powered-By', '').lower()
@@ -1041,7 +1041,7 @@ Live Hosts:
         self.log(f"Redirect tests done: {len(found)} findings", "success")
         return found
     
-    # NEW VULNERABILITY TESTS START HERE
+   
     
     def test_xxe(self):
         self.log("Testing for XXE (XML External Entity)...", "info")
@@ -1054,7 +1054,7 @@ Live Hosts:
         for app in self.data.get('web_apps', [])[:20]:
             url = app['url']
             
-            # check if app accepts XML
+            
             try:
                 r = requests.post(
                     url + '/api/test',
@@ -1064,7 +1064,7 @@ Live Hosts:
                     verify=False
                 )
                 
-                # look for signs of XXE
+                
                 if 'root:' in r.text or '/bin/bash' in r.text or 'daemon' in r.text:
                     vuln = {
                         'type': 'XXE (XML External Entity)',
@@ -1083,7 +1083,6 @@ Live Hosts:
             except:
                 pass
             
-            # also check common API endpoints
             common_xml_eps = ['/api/upload', '/api/parse', '/upload', '/xml']
             for ep in common_xml_eps:
                 try:
@@ -1131,7 +1130,7 @@ Live Hosts:
             '; cat /etc/passwd'
         ]
         
-        # params that commonly have cmd injection
+        
         cmd_params = ['cmd', 'exec', 'command', 'ping', 'ip', 'host']
         
         for ep in self.endpoints[:25]:
@@ -1142,7 +1141,7 @@ Live Hosts:
             params = parse_qs(parsed.query)
             
             for param in params.keys():
-                # check suspicious param names
+                
                 if any(cp in param.lower() for cp in cmd_params):
                     for payload in cmd_payloads:
                         try:
@@ -1153,7 +1152,7 @@ Live Hosts:
                             r = requests.get(test_url, timeout=10, verify=False)
                             elapsed = time.time() - start
                             
-                            # check for command output or timing attacks
+                            
                             cmd_indicators = ['root:', 'uid=', 'gid=', '/bin/', 'daemon']
                             
                             if any(ind in r.text for ind in cmd_indicators):
@@ -1173,7 +1172,7 @@ Live Hosts:
                                 self.log(f"CMD INJECTION found: {base}", "success")
                                 break
                             
-                            # timing based detection for sleep payloads
+                            
                             if 'sleep' in payload and elapsed > 4:
                                 vuln = {
                                     'type': 'Command Injection (Blind)',
@@ -1258,7 +1257,7 @@ Live Hosts:
         
         found = []
         
-        # common sensitive files/dirs
+       
         sensitive = [
             '.git/config',
             '.env',
@@ -1320,7 +1319,7 @@ Live Hosts:
             url = app['url']
             
             try:
-                # test with evil origin
+                
                 r = requests.get(
                     url,
                     headers={'Origin': 'https://evil.com'},
@@ -1383,7 +1382,7 @@ Live Hosts:
                 r = requests.get(url, timeout=5, verify=False)
                 headers = r.headers
                 
-                # check critical security headers
+               
                 if 'X-Frame-Options' not in headers:
                     missing.append('X-Frame-Options (clickjacking protection)')
                 
@@ -1491,7 +1490,7 @@ Live Hosts:
                         
                         r = requests.get(test_url, timeout=5, verify=False, allow_redirects=False)
                         
-                        # check if we injected headers
+                       
                         if 'Set-Cookie' in r.headers and 'test=evil' in r.headers.get('Set-Cookie', ''):
                             vuln = {
                                 'type': 'CRLF Injection',
@@ -1520,7 +1519,7 @@ Live Hosts:
         found = []
         graphql_paths = ['/graphql', '/api/graphql', '/v1/graphql', '/gql']
         
-        # introspection query to dump schema
+       
         intro_query = '{"query": "{__schema{types{name,fields{name}}}}"}'
         
         for app in self.data.get('web_apps', [])[:10]:
@@ -1538,7 +1537,7 @@ Live Hosts:
                         verify=False
                     )
                     
-                    # check if introspection worked
+                    
                     if r.status_code == 200 and '__schema' in r.text:
                         vuln = {
                             'type': 'GraphQL Introspection Enabled',
@@ -1569,10 +1568,10 @@ Live Hosts:
             url = app['url']
             
             try:
-                # try to get a JWT token
+                
                 r = requests.get(url, timeout=5, verify=False)
                 
-                # look for JWT in headers or cookies
+               
                 auth = r.headers.get('Authorization', '')
                 cookies = r.cookies
                 
@@ -1585,13 +1584,13 @@ Live Hosts:
                         token = cookies[cookie]
                 
                 if token:
-                    # try to decode and check alg
+                    
                     try:
                         parts = token.split('.')
                         if len(parts) == 3:
                             header = json.loads(base64.b64decode(parts[0] + '=='))
                             
-                            # check for weak alg
+                            
                             alg = header.get('alg', '')
                             
                             if alg == 'none':
@@ -1611,7 +1610,7 @@ Live Hosts:
                                 self.log(f"JWT none alg: {url}", "success")
                             
                             elif alg in ['HS256', 'HS384', 'HS512']:
-                                # weak secret testing could go here
+                                
                                 vuln = {
                                     'type': 'JWT Weak Secret (Potential)',
                                     'severity': 'MEDIUM',
@@ -1639,7 +1638,7 @@ Live Hosts:
         
         found = []
         
-        # signatures of takeover-able services
+        
         takeover_sigs = {
             'github.io': 'There isn\'t a GitHub Pages site here',
             'herokuapp.com': 'No such app',
@@ -1652,10 +1651,10 @@ Live Hosts:
         
         for sub in list(self.subdomains)[:30]:
             try:
-                # try to resolve
+                
                 ip = socket.gethostbyname(sub)
                 
-                # try to fetch the site
+                
                 for scheme in ['https', 'http']:
                     try:
                         r = requests.get(f"{scheme}://{sub}", timeout=5, verify=False)
@@ -1681,7 +1680,7 @@ Live Hosts:
                     except:
                         pass
             except socket.gaierror:
-                # subdomain doesn't resolve - check if it's registered on services
+                
                 for service in takeover_sigs.keys():
                     if service in sub:
                         vuln = {
@@ -1733,7 +1732,7 @@ Live Hosts:
                         
                         r = requests.get(test_url, timeout=5, verify=False)
                         
-                        # check if our math was evaluated (7*7=49)
+                        
                         if '49' in r.text and payload not in r.text:
                             vuln = {
                                 'type': 'SSTI (Server-Side Template Injection)',
@@ -1765,7 +1764,7 @@ Live Hosts:
             url = app['url']
             
             try:
-                # test with evil host header
+                
                 r = requests.get(
                     url,
                     headers={'Host': 'evil.com'},
@@ -1774,7 +1773,7 @@ Live Hosts:
                     allow_redirects=False
                 )
                 
-                # check if our host is reflected
+                
                 if 'evil.com' in r.text or 'evil.com' in str(r.headers):
                     vuln = {
                         'type': 'Host Header Injection',
@@ -1807,10 +1806,10 @@ Live Hosts:
             
             for path in ws_paths:
                 try:
-                    # check if websocket endpoint exists
+                    
                     ws_url = url.replace('https://', 'wss://').replace('http://', 'ws://') + path
                     
-                    # try to connect with evil origin
+                    
                     headers = {'Origin': 'https://evil.com'}
                     
                     # note: actual WS testing would need websocket library
@@ -1822,7 +1821,7 @@ Live Hosts:
                         verify=False
                     )
                     
-                    # check if endpoint responds
+                    
                     if r.status_code in [101, 200, 426]:
                         vuln = {
                             'type': 'WebSocket Security Issue',
@@ -1844,7 +1843,7 @@ Live Hosts:
         self.log(f"WebSocket tests done: {len(found)} findings", "success")
         return found
     
-    # PoC generators for original vulns
+   
     def xss_poc(self, url, param, payload):
         return f"""
 XSS Proof of Concept
@@ -1941,7 +1940,7 @@ Fix:
 - Validate URLs
 """
     
-    # NEW PoC GENERATORS
+    
     
     def xxe_poc(self, url):
         return f"""
@@ -2333,11 +2332,11 @@ https://github.com/projectdiscovery/nuclei-templates
             self.log("No findings to report", "warning")
             return
         
-        # sort by severity
+        
         sev_order = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3, 'UNKNOWN': 4}
         findings.sort(key=lambda x: sev_order.get(x['severity'], 99))
         
-        # count by severity
+       
         crit = len([f for f in findings if f['severity'] == 'CRITICAL'])
         high = len([f for f in findings if f['severity'] == 'HIGH'])
         med = len([f for f in findings if f['severity'] == 'MEDIUM'])
@@ -2345,7 +2344,7 @@ https://github.com/projectdiscovery/nuclei-templates
         
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
-        # Generate each requested format
+       
         generated_files = []
         
         if 'txt' in self.output_formats:
@@ -2467,7 +2466,7 @@ https://github.com/projectdiscovery/nuclei-templates
     def generate_html_report(self, findings, crit, high, med, low, timestamp):
         """Generate HTML report with styling"""
         
-        # severity colors
+        
         sev_colors = {
             'CRITICAL': '#dc3545',
             'HIGH': '#fd7e14',
@@ -2672,13 +2671,13 @@ https://github.com/projectdiscovery/nuclei-templates
         
         self.analyze()
         
-        # NEW: Advanced recon options
+        
         try:
             self.advanced_recon_menu()
         except KeyboardInterrupt:
             self.log("\nStopped by user", "warning")
         
-        # NEW: Output format selection
+        
         self.output_format_menu()
         
         self.test_vulns()
