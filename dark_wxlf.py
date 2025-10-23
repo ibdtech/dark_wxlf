@@ -412,12 +412,41 @@ Live Hosts:
         """Fuzz for hidden directories and files using ffuf"""
         self.log("Starting directory/file fuzzing with ffuf...", "info")
         
-        # check if ffuf is installed
+        # check if ffuf is installed - try multiple ways
+        ffuf_found = False
+        
+        # method 1: try running it directly with shell
         try:
-            subprocess.run(['ffuf', '-h'], capture_output=True, timeout=2)
+            result = subprocess.run(
+                'ffuf -h',
+                shell=True,
+                capture_output=True,
+                timeout=3,
+                text=True
+            )
+            if result.returncode == 0 or 'ffuf' in result.stdout.lower():
+                ffuf_found = True
         except:
+            pass
+        
+        # method 2: check common install locations
+        if not ffuf_found:
+            common_paths = [
+                os.path.expanduser('~/go/bin/ffuf'),
+                '/usr/local/bin/ffuf',
+                '/usr/bin/ffuf',
+                os.path.expanduser('~/.local/bin/ffuf')
+            ]
+            
+            for path in common_paths:
+                if os.path.exists(path):
+                    ffuf_found = True
+                    break
+        
+        if not ffuf_found:
             self.log("ffuf not installed - skipping fuzzing", "error")
             self.log("Install: go install github.com/ffuf/ffuf@latest", "info")
+            self.log("Then run: export PATH=$PATH:~/go/bin", "info")
             return
         
         wordlist_paths = [
@@ -480,12 +509,41 @@ Live Hosts:
         """Run nuclei vulnerability scanner"""
         self.log("Starting Nuclei vulnerability scan...", "info")
         
-        # check if nuclei is installed
+        # check if nuclei is installed - try multiple ways
+        nuclei_found = False
+        
+        # method 1: try running it directly with shell
         try:
-            subprocess.run(['nuclei', '-version'], capture_output=True, timeout=2)
+            result = subprocess.run(
+                'nuclei -version',
+                shell=True,
+                capture_output=True,
+                timeout=3,
+                text=True
+            )
+            if result.returncode == 0 or 'nuclei' in result.stdout.lower():
+                nuclei_found = True
         except:
+            pass
+        
+        # method 2: check common install locations
+        if not nuclei_found:
+            common_paths = [
+                os.path.expanduser('~/go/bin/nuclei'),
+                '/usr/local/bin/nuclei',
+                '/usr/bin/nuclei',
+                os.path.expanduser('~/.local/bin/nuclei')
+            ]
+            
+            for path in common_paths:
+                if os.path.exists(path):
+                    nuclei_found = True
+                    break
+        
+        if not nuclei_found:
             self.log("Nuclei not installed - skipping", "error")
             self.log("Install: go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest", "info")
+            self.log("Then run: export PATH=$PATH:~/go/bin", "info")
             return []
         
         findings = []
@@ -500,7 +558,7 @@ Live Hosts:
         self.log("This might take a few minutes...", "info")
         
         try:
-            # run nuclei with common templates
+            # run nuclei with common templates - use shell=True to respect PATH
             cmd = f'nuclei -l {url_file} -silent -json -severity critical,high,medium -timeout 10 -retries 1'
             
             result = subprocess.run(
