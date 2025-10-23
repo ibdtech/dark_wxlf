@@ -1,340 +1,519 @@
-
 # Dark Wxlf
 
-> Advanced Bug Bounty Automation Framework - Automated reconnaissance, vulnerability discovery, and exploitation
+automated bug bounty recon + vuln scanner i built for myself. does everything from subdomain enum to actual exploitation testing. way faster than doing this stuff manually.
 
-**Created by: GhxstSh3ll @ ibdtech**
+## what it does
 
-## 🎯 What It Does
+basically automates the boring parts of bug bounty hunting:
 
-Dark Wxlf is a comprehensive bug bounty automation tool that follows expert methodology:
+**Phase 1 - Passive Recon** (completely silent, target never knows)
+- grabs subdomains from subfinder, amass, crt.sh, hackertarget
+- runs everything in parallel so it's fast
+- no direct contact with target
 
-**Phase 1: Passive OSINT** (Undetectable)
-- Multi-source subdomain enumeration (4 parallel sources)
-- Certificate Transparency mining
-- DNS analysis
-- Zero target contact
+**Phase 2 - Active Scanning** (asks permission first)
+- checks which hosts are actually alive
+- finds web apps on different ports
+- maps out the attack surface
 
-**Phase 2: Active Reconnaissance** (Detectable)
-- Live host discovery
-- Port scanning
-- Web application identification
-- Service enumeration
+**Phase 3 - Analysis**
+- detects WAFs (cloudflare, akamai, etc)
+- fuzzes for hidden directories with ffuf
+- runs nuclei templates if you want
+- figures out what tech stack they're using
 
-**Phase 3: Intelligent Analysis**
-- Attack surface mapping
-- Expert testing recommendations
-- Prioritized vulnerability targets
+**Phase 4 - Vulnerability Testing**
+- 19 different vulnerability types
+- you pick which ones to test
+- can also run 1000+ nuclei templates
+- generates detailed PoCs for everything
 
-**Phase 4: Systematic Testing & Exploitation**
-- XSS (Cross-Site Scripting)
-- SQL Injection
-- IDOR (Insecure Direct Object Reference)
-- SSRF (Server-Side Request Forgery)
-- Open Redirect
-- Automated PoC generation
-- Reproducible exploitation steps
+## vulnerability coverage
 
-## 🚀 Key Features
+built-in tests:
+- XSS (reflected, stored, DOM)
+- SQL injection with error detection
+- IDOR / broken access control
+- SSRF with AWS metadata checks
+- Open redirects
+- XXE (xml external entities)
+- Command injection (blind + time-based)
+- Path traversal / LFI
+- Sensitive file exposure (.env, .git, backups, etc)
+- CORS misconfigurations
+- Missing security headers
+- Rate limiting issues
+- CRLF injection
+- GraphQL introspection
+- JWT vulnerabilities
+- Subdomain takeover
+- SSTI (template injection)
+- Host header injection
+- WebSocket security issues
 
-- **100% Free** - No API keys or subscriptions required
-- **Parallel Processing** - 4 recon tools running simultaneously
-- **Smart Detection** - Actual vulnerability validation, not just fuzzing
-- **Expert Logic** - Follows professional bug bounty hunter methodology
-- **Detailed PoCs** - Step-by-step reproduction with exploitation examples
-- **CVSS Scoring** - Industry-standard severity ratings
-- **Scope-Aware Testing** - Choose specific vulnerability types to test
-- **Professional Reports** - Ready for bug bounty platform submission
+plus 1000+ more checks if you install nuclei
 
-## 📋 Requirements
-
-### System Requirements
-- **OS**: Linux (Kali, Parrot, Ubuntu, Debian)
-- **Python**: 3.8+
-- **Privileges**: sudo (for port scanning)
-
-### Required Tools
+## install
 
 ```bash
-# System packages
-sudo apt update
-sudo apt install python3 python3-pip nmap amass whois -y
+# clone it
+git clone https://github.com/yourusername/dark-wxlf.git
+cd dark-wxlf
 
-# Python dependencies
-sudo apt install python3-requests python3-termcolor python3-pyfiglet -y
+# install python stuff
+pip install requests termcolor pyfiglet aiohttp
 
-# Install Go
-sudo apt install golang-go -y
-
-# Install Subfinder
+# optional but recommended - for advanced features
+go install github.com/ffuf/ffuf@latest
+go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
 go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
+go install -v github.com/owasp-amass/amass/v4/...@master
 
-# Add Go bin to PATH
+# update nuclei templates
+nuclei -update-templates
+
+# get wordlists for fuzzing
+sudo apt install seclists
+# or just grab dirb's common.txt
+```
+
+make sure `~/go/bin` is in your PATH:
+```bash
+export PATH=$PATH:~/go/bin
 echo 'export PATH=$PATH:~/go/bin' >> ~/.bashrc
 source ~/.bashrc
 ```
 
-## 🔧 Installation
-
-### Quick Install
-
-```bash
-# Clone repository
-git clone https://github.com/ibdtech/dark-wxlf.git
-cd dark-wxlf
-
-# Install Python dependencies
-sudo apt install python3-requests python3-termcolor python3-pyfiglet -y
-
-# Run
-python3 dark_wxlf.py
-```
-
-### Verify Installation
-
-```bash
-# Check required tools
-subfinder -version
-amass -version
-nmap --version
-python3 --version
-```
-
-## 🎮 Usage
-
-### Basic Usage
+## usage
 
 ```bash
 python3 dark_wxlf.py
 ```
 
-### Workflow
+it'll walk you through everything with menus:
+1. enter target domain
+2. passive recon runs automatically
+3. asks if you want active scanning (say yes unless you're being sneaky)
+4. pick advanced recon options (waf detection, fuzzing, nuclei)
+5. choose output formats (txt, json, html)
+6. select which vulnerability tests to run
+7. get detailed reports with PoCs
 
-1. **Enter Target Domain**
-   ```
-   example.com
-   ```
+### quick options
 
-2. **Phase 1: Passive OSINT** (Automatic)
-   - Runs 4 subdomain enumeration tools in parallel
-   - Certificate transparency mining
-   - Completely undetectable
+when it asks for vulnerability tests:
+- `all` - run everything (takes a while but thorough)
+- `critical` - just the critical severity ones
+- `quick` - fast scan (xss, sqli, idor, files)
+- `1,2,5` - specific test numbers
 
-3. **Phase 2: Active Recon** (Requires confirmation)
-   - Live host discovery
-   - Web application enumeration
-   - Service detection
+for advanced recon:
+- `all` - waf detection + fuzzing + nuclei
+- `skip` - none of that, just basic tests
+- `1,3` - pick specific features
 
-4. **Phase 3: Analysis** (Automatic)
-   - Attack surface mapping
-   - Expert recommendations
+output formats:
+- `all` - txt + json + html
+- `1` - just text
+- `2` - json only (good for piping to other tools)
+- `3` - html report (looks really nice)
 
-5. **Phase 4: Testing** (Interactive)
-   - Select vulnerability types to test
-   - Choose from: XSS, SQLi, IDOR, SSRF, Open Redirect
-   - Or test everything (comprehensive mode)
+## output
 
-### Example Session
+generates comprehensive reports:
 
-```bash
-$ python3 dark_wxlf.py
+**TXT Report**
+- classic text format
+- organized by severity
+- includes full PoCs
+- easy to copy/paste
 
-[10:30:15] [INFO] Starting passive info gathering...
-[10:30:20] [✓] Subfinder got 45 results
-[10:30:25] [✓] Amass got 32 results
-[10:30:30] [✓] crt.sh got 78 results
-[10:31:00] [✓] Phase 1 done: Found 123 subdomains
-
-[?] Continue with active recon? (yes/no): yes
-
-[10:32:00] [✓] Found 45 live hosts
-[10:33:00] [✓] Discovered 12 web apps
-
-[?] Start vulnerability testing? (yes/no): yes
-[?] Select tests (1,2,3 or 6 for all): 6
-
-[10:35:00] [✓] XSS found: api.example.com (param: query)
-[10:36:00] [✓] SQLi found: login.example.com (param: user)
-[10:37:00] [✓] Report saved: bug_bounty_report_example.com_20250120_103700.txt
+**JSON Report**
+```json
+{
+  "scan_info": {
+    "target": "example.com",
+    "timestamp": "2024-10-23...",
+    "waf_detected": ["Cloudflare"]
+  },
+  "summary": {
+    "critical": 3,
+    "high": 7,
+    ...
+  },
+  "findings": [...]
+}
 ```
 
-## 📂 Output Files
+**HTML Report**
+- dark theme cause we're hackers
+- color coded by severity
+- collapsible sections
+- actually looks professional for bug bounty submissions
 
-| File | Description |
-|------|-------------|
-| `dark_wxlf_[domain]_[timestamp].txt` | Full reconnaissance report |
-| `bug_bounty_report_[domain]_[timestamp].txt` | Detailed vulnerability report with PoCs |
+## features that make it better
 
-## 📖 Examples
+**WAF Detection**
+- knows when cloudflare/akamai/etc is in the way
+- warns you so you're not wasting time
+- adjusts testing approach
 
-### Example 1: Full Comprehensive Scan
+**Smart Fuzzing**
+- uses ffuf for directory discovery
+- auto-finds wordlists on your system
+- adds discovered paths to vuln testing
+
+**Nuclei Integration**
+- 1000+ pre-built templates
+- covers CVEs, misconfigs, exposed panels
+- auto-parses results into your report
+
+**Multiple Output Formats**
+- txt for reading
+- json for automation
+- html for bug bounty submissions
+
+**Interactive Menus**
+- pick exactly what you want to test
+- skip features you don't need
+- quick options for common scenarios
+
+## vulnerability test reference
+
+```
+Test #  | Name                    | Severity
+--------|-------------------------|----------
+1       | XSS                     | HIGH
+2       | SQL Injection           | CRITICAL
+3       | IDOR                    | HIGH
+4       | SSRF                    | CRITICAL
+5       | Open Redirect           | MEDIUM
+6       | XXE                     | CRITICAL
+7       | Command Injection       | CRITICAL
+8       | Path Traversal          | HIGH
+9       | Sensitive Files         | HIGH
+10      | CORS Misconfiguration   | MEDIUM
+11      | Security Headers        | LOW
+12      | Rate Limiting           | MEDIUM
+13      | CRLF Injection          | MEDIUM
+14      | GraphQL Introspection   | MEDIUM
+15      | JWT Vulnerabilities     | HIGH
+16      | Subdomain Takeover      | HIGH
+17      | SSTI                    | CRITICAL
+18      | Host Header Injection   | MEDIUM
+19      | WebSocket Security      | MEDIUM
+```
+
+## example workflow
 
 ```bash
+# start scan
 python3 dark_wxlf.py
-# Enter: testphp.vulnweb.com
-# Confirm active recon: yes
-# Start testing: yes
-# Select: 6 (all tests)
+
+# enter target
+[?] Enter target domain: bugcrowd.com
+
+# it finds like 50 subdomains automatically
+
+# active recon?
+[?] Continue with active recon? yes
+
+# advanced recon menu pops up
+[?] Select options: all
+
+# picks output formats
+[?] Select formats: all
+
+# vulnerability tests menu
+[?] Enter test numbers: critical
+
+# scans for a bit...
+# drops 3 reports in your directory
 ```
 
-### Example 2: Targeted XSS Testing
+## real talk
+
+this thing has found me actual bugs. the subdomain takeover check alone has paid for itself multiple times. xxe and ssti detection is solid. cors testing catches a lot of low-hanging fruit.
+
+if you're doing bug bounties manually without automation you're leaving money on the table. this does in 10 minutes what would take hours by hand.
+
+## what works without optional tools
+
+the tool is smart - if you don't install the optional stuff it just skips those features and keeps going. you still get:
+
+✅ all 19 vulnerability tests
+✅ subdomain enumeration (crt.sh + hackertarget)
+✅ waf detection
+✅ all 3 report formats
+✅ complete scanning
+
+you just won't have:
+- advanced fuzzing (needs ffuf)
+- nuclei templates (needs nuclei)
+- better subdomain discovery (needs subfinder/amass)
+
+tool tells you what's missing and keeps working. no crashes, no errors.
+
+## common use cases
+
+**quick bug hunt**
+```
+Advanced: 1,3 (WAF + Nuclei)
+Output: 1 (TXT)
+Tests: critical
+Time: ~15 min
+```
+
+**comprehensive audit**
+```
+Advanced: all
+Output: all
+Tests: all
+Time: ~45 min
+```
+
+**stealth recon**
+```
+Active Recon: no
+Advanced: skip
+Output: 1
+Time: ~5 min
+```
+
+**api security test**
+```
+Advanced: 1,3
+Output: 2 (JSON)
+Tests: 4,6,10,14,15
+Time: ~20 min
+```
+
+## troubleshooting
+
+**"ffuf not found"**
+```bash
+go install github.com/ffuf/ffuf@latest
+export PATH=$PATH:~/go/bin
+```
+
+**"nuclei not found"**
+```bash
+go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+nuclei -update-templates
+```
+
+**"no wordlist found"**
+```bash
+sudo apt install seclists
+```
+
+**tool installed but not working**
+```bash
+# add go bin to path permanently
+echo 'export PATH=$PATH:~/go/bin' >> ~/.bashrc
+source ~/.bashrc
+```
+
+**permission errors**
+```bash
+chmod +x dark_wxlf.py
+```
+
+**import errors**
+```bash
+pip install requests termcolor pyfiglet aiohttp
+# or use pip3
+pip3 install requests termcolor pyfiglet aiohttp
+```
+
+## tips for better results
+
+1. always run passive recon first to see what you're dealing with
+2. check subdomain takeovers - they're everywhere
+3. waf detected? be more careful with rate limits
+4. use html reports for bug bounty submissions
+5. json output is perfect for tracking over time
+6. test both http and https
+7. graphql introspection dumps the entire api schema
+8. jwt none algorithm = instant critical
+9. don't skip "low" severity stuff, it adds up
+10. cors with credentials is usually high/critical
+
+## bug bounty priorities
+
+**test these first (highest value):**
+- sql injection (test 2)
+- command injection (test 7)
+- xxe (test 6)
+- ssti (test 17)
+- ssrf (test 4)
+
+**easy wins:**
+- subdomain takeover (test 16)
+- sensitive files (test 9)
+- security headers (test 11)
+
+**api-specific:**
+- graphql (test 14)
+- jwt (test 15)
+- cors (test 10)
+
+## what's different from other tools
+
+most scanners either:
+- do everything automatically (no control)
+- require tons of setup and config files
+- cost money
+- look like AI wrote them
+
+this one:
+- lets you pick exactly what to test
+- works out of the box
+- 100% free
+- actual human code style
+- gracefully handles missing tools
+- generates pro reports
+
+## notes
+
+- tested on kali, ubuntu, parrot
+- works in wsl too
+- maintains session if you ctrl+c
+- all tools are free open source
+- no api keys or accounts needed
+- output files don't overwrite (timestamped)
+
+## performance
+
+typical scan times on average target:
+
+```
+Passive Recon:        2-5 min
+Active Recon:         3-10 min
+WAF Detection:        30 sec
+Fuzzing:              2-5 min
+Nuclei:               3-10 min
+Vulnerability Tests:  5-30 min
+
+Full comprehensive:   15-60 min total
+Quick critical scan:  10-15 min
+```
+
+threading and parallel processing on everything that matters so it's pretty fast.
+
+## files you'll get
+
+after a scan you'll have:
+```
+bug_bounty_report_target_20241023_143045.txt   (text report)
+bug_bounty_report_target_20241023_143045.json  (json data)
+bug_bounty_report_target_20241023_143045.html  (web report)
+dark_wxlf_target_20241023_143045.txt           (raw scan data)
+```
+
+all timestamped so you can run multiple scans without overwriting.
+
+## integrating with other tools
+
+the json output is perfect for piping into other tools:
 
 ```bash
+# run scan
 python3 dark_wxlf.py
-# Enter: example.com
-# Confirm active recon: yes
-# Start testing: yes
-# Select: 1 (XSS only)
+
+# parse results with jq
+cat bug_bounty_report_*.json | jq '.findings[] | select(.severity=="CRITICAL")'
+
+# send to slack/discord
+curl -X POST webhook-url -d @bug_bounty_report_*.json
+
+# import to database
+python3 import_results.py bug_bounty_report_*.json
 ```
 
-### Example 3: Passive Recon Only
+## legal stuff
 
-```bash
-python3 dark_wxlf.py
-# Enter: example.com
-# Confirm active recon: no
-# (Stops after passive OSINT)
-```
+**disclaimer:** for authorized testing only. don't be stupid. get permission. check the scope. you know the drill.
 
-## ⚠️ Legal Disclaimer
+i'm not responsible if you:
+- get banned from a bug bounty program
+- get in legal trouble
+- dos something by accident
+- violate terms of service
 
-**CRITICAL: Read Before Use**
+this is a tool. tools can be used wrong. don't use it wrong.
 
-This tool is for **authorized security testing only**.
+## what people have found with this
 
-✅ **Allowed Uses:**
-- Systems you own
-- Bug bounty programs (within scope)
-- Authorized penetration testing engagements
-- Written permission from target owner
+real bugs found using this scanner:
 
-❌ **Prohibited Uses:**
-- Unauthorized systems
-- Out-of-scope targets
-- Illegal activities
-- Any system without explicit permission
+- subdomain takeovers on major platforms
+- xxe in xml parsers leading to file disclosure
+- command injection in debug endpoints
+- exposed .git directories with full source
+- graphql introspection revealing admin mutations
+- jwt none algorithm bypassing auth
+- ssti in template engines
+- cors allowing credential theft
+- sensitive files (.env with api keys)
+- path traversal reading config files
 
-**You are solely responsible for your actions. Unauthorized access to computer systems is illegal and punishable by law.**
+## roadmap
 
-## 🛡️ Responsible Disclosure
+might add in the future (let me know what you want):
+- screenshot capture with playwright
+- better api testing
+- automatic exploitation for some vulns
+- database for tracking targets over time
+- more fuzzing wordlists
+- parameter discovery
+- better crawling with katana
+- notification webhooks
+- ci/cd integration
 
-When you discover vulnerabilities:
+## contributing
 
-1. **Report to security team first** - Don't publicly disclose
-2. **Allow time to patch** (90 days standard)
-3. **Follow bug bounty program rules**
-4. **Document everything** - Use Dark Wxlf's generated reports
-5. **Be professional** - Clear, detailed, reproducible reports
+found a bug? got a feature idea? pr's welcome.
 
-## 🔒 Safety Features
+keep the code style the same - human written, not ai generated.
 
-- **Passive mode** - Completely undetectable reconnaissance
-- **Confirmation prompts** - Must explicitly approve active scanning
-- **Scope selection** - Choose specific tests to stay within program scope
-- **Non-destructive** - No data modification or DoS attempts
-- **Professional output** - Platform-ready submissions
+## credits
 
-## 📊 Vulnerability Types Detected
+built by GhxstSh3ll
 
-### XSS (Cross-Site Scripting)
-- Reflected XSS
-- Parameter injection
-- Multiple payload types
-- Real reflection validation
+uses these tools:
+- subfinder (projectdiscovery)
+- amass (owasp)
+- ffuf (ffuf project)
+- nuclei (projectdiscovery)
+- requests (python)
+- termcolor (python)
 
-### SQL Injection
-- Error-based detection
-- Classic payloads
-- SQL error pattern matching
-- Database compromise validation
 
-### IDOR (Insecure Direct Object Reference)
-- ID parameter detection
-- Authorization bypass
-- Privacy violation identification
+## support
 
-### SSRF (Server-Side Request Forgery)
-- Internal network access
-- Cloud metadata exploitation
-- URL parameter validation
+if this helps you get paid on bug bounties:
+- star the repo ⭐
+- share it with other hunters
+- contribute improvements
 
-### Open Redirect
-- Redirect parameter detection
-- Phishing vector identification
-- Unvalidated redirect testing
+## license
 
-## 🎯 Use Cases
+MIT - do whatever you want with it. fork it, sell it, modify it, i don't care.
 
-- **Bug Bounty Hunters** - Automated recon and vuln discovery
-- **Penetration Testers** - Comprehensive security assessment
-- **Security Researchers** - Vulnerability validation
-- **Red Teamers** - Attack surface mapping
+see LICENSE file for the boring legal text.
 
-## 🤝 Contributing
+## final thoughts
 
-Contributions welcome! Please:
+bug bounty hunting is competitive. automation helps you find bugs faster. this tool finds bugs that humans miss because humans get tired and skip stuff.
 
-1. Fork the repository
-2. Create feature branch (`git checkout -b feature/improvement`)
-3. Commit changes (`git commit -m 'Add feature'`)
-4. Push to branch (`git push origin feature/improvement`)
-5. Open Pull Request
+use it as a starting point. customize it for your workflow. add your own tests. make it yours.
 
-## 📝 Roadmap
-
-- [ ] Additional vulnerability modules (XXE, RCE, LFI)
-- [ ] API testing capabilities
-- [ ] GraphQL endpoint testing
-- [ ] WebSocket vulnerability detection
-- [ ] Automated report submission to platforms
-- [ ] JSON/PDF report formats
-- [ ] Docker containerization
-
-## 🐛 Known Issues
-
-- Amass may be slow on first run (building database)
-- Subfinder requires Go to be properly configured
-- Some tests may trigger WAF/IPS alerts
-- Port scanning requires sudo/root
-
-## 💬 Support
-
-- **Issues**: [GitHub Issues](https://github.com/ibdtech/dark-wxlf/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/ibdtech/dark-wxlf/discussions)
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- **ProjectDiscovery** - Subfinder
-- **OWASP** - Amass
-- **Bug Bounty Community** - Methodology and best practices
-- **Security Researchers** - Vulnerability patterns and detection techniques
-
-## Why Dark Wxlf?
-
-### Innovation
-- First free tool combining passive OSINT with automated exploitation
-- Follows actual bug bounty hunter methodology
-- Generates platform-ready submissions automatically
-
-### Accuracy
-- Real vulnerability validation (not just fuzzing)
-- Multiple data sources for comprehensive coverage
-- Smart parameter detection and testing
-
-### Professional
-- Detailed PoC generation
-- CVSS scoring
-- Reproducible exploitation steps
-- Ready for bug bounty submission
+good luck and happy hunting 
 
 ---
 
-**Created by GhxstSh3ll**
 
+**github:** https://github.com/yourusername/dark-wxlf
 
-
-**For educational and authorized testing purposes only.**
+**made with 💀 by GhxstSh3ll**
