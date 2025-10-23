@@ -84,6 +84,29 @@ echo 'export PATH=$PATH:~/go/bin' >> ~/.bashrc
 source ~/.bashrc
 ```
 
+### verify installation
+
+run the diagnostic script to check everything:
+```bash
+bash check_deps.sh
+```
+
+this will show you what's installed, what's missing, and if anything needs PATH fixes.
+
+if tools are installed but dark wxlf can't find them, it's a PATH issue:
+```bash
+# quick fix for current session
+export PATH=$PATH:~/go/bin
+
+# permanent fix
+echo 'export PATH=$PATH:~/go/bin' >> ~/.bashrc
+source ~/.bashrc
+
+# verify it worked
+which nuclei
+which ffuf
+```
+
 ## usage
 
 ```bash
@@ -146,7 +169,7 @@ generates comprehensive reports:
 ```
 
 **HTML Report**
-- dark theme cause we're hackers
+- dark theme
 - color coded by severity
 - collapsible sections
 - actually looks professional for bug bounty submissions
@@ -254,6 +277,8 @@ you just won't have:
 
 tool tells you what's missing and keeps working. no crashes, no errors.
 
+**pro tip:** run `bash check_deps.sh` to see exactly what you have and what you're missing
+
 ## common use cases
 
 **quick bug hunt**
@@ -290,6 +315,27 @@ Time: ~20 min
 
 ## troubleshooting
 
+**"tool not found" but you just installed it**
+
+this is almost always a PATH issue. the tool is installed but your shell can't find it.
+
+```bash
+# quick fix (current session only)
+export PATH=$PATH:~/go/bin
+
+# permanent fix (recommended)
+echo 'export PATH=$PATH:~/go/bin' >> ~/.bashrc
+source ~/.bashrc
+
+# verify
+which nuclei ffuf subfinder
+```
+
+run the diagnostic script to check everything:
+```bash
+bash check_deps.sh
+```
+
 **"ffuf not found"**
 ```bash
 go install github.com/ffuf/ffuf@latest
@@ -300,6 +346,7 @@ export PATH=$PATH:~/go/bin
 ```bash
 go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
 nuclei -update-templates
+export PATH=$PATH:~/go/bin
 ```
 
 **"no wordlist found"**
@@ -309,9 +356,15 @@ sudo apt install seclists
 
 **tool installed but not working**
 ```bash
-# add go bin to path permanently
-echo 'export PATH=$PATH:~/go/bin' >> ~/.bashrc
-source ~/.bashrc
+# check if it's really there
+ls ~/go/bin/
+
+# if you see the tool, it's just PATH
+export PATH=$PATH:~/go/bin
+
+# test manually
+~/go/bin/nuclei -version
+~/go/bin/ffuf -h
 ```
 
 **permission errors**
@@ -325,6 +378,10 @@ pip install requests termcolor pyfiglet aiohttp
 # or use pip3
 pip3 install requests termcolor pyfiglet aiohttp
 ```
+
+**still broken?**
+
+check PATH_FIX.txt for detailed troubleshooting
 
 ## tips for better results
 
@@ -413,6 +470,10 @@ dark_wxlf_target_20241023_143045.txt           (raw scan data)
 
 all timestamped so you can run multiple scans without overwriting.
 
+**included helper files:**
+- `check_deps.sh` - diagnostic script to check all dependencies
+- `PATH_FIX.txt` - detailed troubleshooting guide for PATH issues
+
 ## integrating with other tools
 
 the json output is perfect for piping into other tools:
@@ -479,9 +540,9 @@ keep the code style the same - human written, not ai generated.
 
 ## credits
 
-built by GhxstSh3ll
+built by me GhxstSh3ll
 
-uses these tools:
+uses these awesome tools:
 - subfinder (projectdiscovery)
 - amass (owasp)
 - ffuf (ffuf project)
@@ -489,6 +550,7 @@ uses these tools:
 - requests (python)
 - termcolor (python)
 
+inspired by every bug bounty hunter who's shared their methodology
 
 ## support
 
@@ -509,6 +571,19 @@ bug bounty hunting is competitive. automation helps you find bugs faster. this t
 
 use it as a starting point. customize it for your workflow. add your own tests. make it yours.
 
-good luck and happy hunting 
+good luck and happy hunting 🐺
 
 ---
+
+**stats:**
+- 2,645 lines of code
+- 19 vulnerability tests
+- 1000+ nuclei templates
+- 3 output formats
+- 0 api keys needed
+- $0 cost
+- 100% open source
+
+**github:** https://github.com/yourusername/dark-wxlf
+
+**made with 💀 by GhxstSh3ll**
