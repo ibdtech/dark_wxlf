@@ -512,8 +512,3 @@ use it as a starting point. customize it for your workflow. add your own tests. 
 good luck and happy hunting 
 
 ---
-
-
-**github:** https://github.com/yourusername/dark-wxlf
-
-**made with 💀 by GhxstSh3ll**
