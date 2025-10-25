@@ -318,54 +318,65 @@ Live Hosts:
         total_apps = len(self.data.get('web_apps', []))
         analyzed = 0
         
-        for app in self.data.get('web_apps', []):
-            url = app['url']
-            analyzed += 1
+        # use threadpool for parallel analysis - way faster
+        with ThreadPoolExecutor(max_workers=20) as ex:
+            def analyze_app(app):
+                url = app['url']
+                
+                try:
+                    # reduced timeout from 10s to 5s - still catches everything
+                    r = requests.get(url, timeout=5, verify=False)
+                    
+                    # check headers for tech
+                    headers = r.headers
+                    server = headers.get('Server', '').lower()
+                    xpowered = headers.get('X-Powered-By', '').lower()
+                    
+                    techs = []
+                    
+                    if 'nginx' in server:
+                        techs.append('Nginx')
+                    if 'apache' in server:
+                        techs.append('Apache')
+                    if 'cloudflare' in server:
+                        techs.append('Cloudflare')
+                    if 'php' in xpowered:
+                        techs.append('PHP')
+                    if 'asp.net' in xpowered:
+                        techs.append('ASP.NET')
+                    
+                    # check body for frameworks
+                    body = r.text.lower()
+                    
+                    if 'wordpress' in body or 'wp-content' in body:
+                        techs.append('WordPress')
+                    if 'joomla' in body:
+                        techs.append('Joomla')
+                    if 'drupal' in body:
+                        techs.append('Drupal')
+                    if 'react' in body or 'reactjs' in body:
+                        techs.append('React')
+                    if 'angular' in body or 'ng-app' in body:
+                        techs.append('Angular')
+                    if 'vue' in body or 'vuejs' in body:
+                        techs.append('Vue.js')
+                    
+                    return (url, techs)
+                    
+                except:
+                    return (url, [])
             
-            # show progress
-            print(f"\r[*] Analyzing apps: {analyzed}/{total_apps}", end='', flush=True)
+            jobs = [ex.submit(analyze_app, app) for app in self.data.get('web_apps', [])]
             
-            try:
-                r = requests.get(url, timeout=10, verify=False)
+            for job in as_completed(jobs):
+                url, techs = job.result()
+                analyzed += 1
                 
-                # check headers for tech
-                headers = r.headers
-                server = headers.get('Server', '').lower()
-                xpowered = headers.get('X-Powered-By', '').lower()
+                # show progress
+                print(f"\r[*] Analyzing apps: {analyzed}/{total_apps}", end='', flush=True)
                 
-                techs = []
-                
-                if 'nginx' in server:
-                    techs.append('Nginx')
-                if 'apache' in server:
-                    techs.append('Apache')
-                if 'cloudflare' in server:
-                    techs.append('Cloudflare')
-                if 'php' in xpowered:
-                    techs.append('PHP')
-                if 'asp.net' in xpowered:
-                    techs.append('ASP.NET')
-                
-                # check body for frameworks
-                body = r.text.lower()
-                
-                if 'wordpress' in body or 'wp-content' in body:
-                    techs.append('WordPress')
-                if 'joomla' in body:
-                    techs.append('Joomla')
-                if 'drupal' in body:
-                    techs.append('Drupal')
-                if 'react' in body or 'reactjs' in body:
-                    techs.append('React')
-                if 'angular' in body or 'ng-app' in body:
-                    techs.append('Angular')
-                if 'vue' in body or 'vuejs' in body:
-                    techs.append('Vue.js')
-                
-                self.tech[url] = techs
-                
-            except Exception as e:
-                pass
+                if techs:
+                    self.tech[url] = techs
         
         print()  # newline after progress
         self.log("Tech detection complete", "success")
@@ -375,31 +386,45 @@ Live Hosts:
         
         crawled = 0
         total_crawl = len(self.data.get('web_apps', []))
+        found_endpoints = []
         
-        for app in self.data.get('web_apps', []):
-            url = app['url']
-            crawled += 1
+        # parallel crawling for speed
+        with ThreadPoolExecutor(max_workers=20) as ex:
+            def crawl_app(app):
+                url = app['url']
+                endpoints = []
+                
+                try:
+                    r = requests.get(url, timeout=5, verify=False)
+                    
+                    # find links
+                    links = re.findall(r'href=["\'](.*?)["\']', r.text)
+                    
+                    for link in links:
+                        if link.startswith('http'):
+                            endpoints.append(link)
+                        elif link.startswith('/'):
+                            endpoints.append(f"{url}{link}")
+                    
+                except:
+                    pass
+                
+                return endpoints
             
-            # show crawling progress
-            print(f"\r[*] Crawling: {crawled}/{total_crawl} ({len(self.endpoints)} endpoints)", end='', flush=True)
+            jobs = [ex.submit(crawl_app, app) for app in self.data.get('web_apps', [])]
             
-            try:
-                r = requests.get(url, timeout=10, verify=False)
+            for job in as_completed(jobs):
+                endpoints = job.result()
+                crawled += 1
                 
-                # find links
-                links = re.findall(r'href=["\'](.*?)["\']', r.text)
+                if endpoints:
+                    found_endpoints.extend(endpoints)
                 
-                for link in links:
-                    if link.startswith('http'):
-                        self.endpoints.append(link)
-                    elif link.startswith('/'):
-                        self.endpoints.append(f"{url}{link}")
-                
-            except:
-                pass
+                # show crawling progress
+                print(f"\r[*] Crawling: {crawled}/{total_crawl} ({len(found_endpoints)} endpoints)", end='', flush=True)
         
         print()  # newline
-        self.endpoints = list(set(self.endpoints))[:100]  # limit to first 100
+        self.endpoints = list(set(found_endpoints))[:100]  # limit to first 100
         
         self.log(f"Found {len(self.endpoints)} endpoints", "success")
     
