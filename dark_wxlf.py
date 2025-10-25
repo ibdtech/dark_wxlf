@@ -112,6 +112,20 @@ All Subdomains:
             return set()
         
         def amass_scan():
+            # check if amass is installed first
+            try:
+                check = subprocess.run(
+                    'amass -version',
+                    shell=True,
+                    capture_output=True,
+                    timeout=3,
+                    text=True
+                )
+                if check.returncode != 0:
+                    return set()
+            except:
+                return set()
+            
             try:
                 self.log("Starting amass passive mode...", "info")
                 r = subprocess.run(
@@ -122,8 +136,9 @@ All Subdomains:
                     results = set([s.strip() for s in r.stdout.strip().split('\n') if s.strip()])
                     self.log(f"Amass got {len(results)} results", "success")
                     return results
-            except Exception as e:
-                self.log(f"Amass error: {str(e)[:50]}", "error")
+            except:
+                # silently skip if amass fails - no error needed
+                pass
             return set()
         
         def crtsh():
@@ -300,8 +315,15 @@ Live Hosts:
         
         self.log("Running tech detection...", "info")
         
+        total_apps = len(self.data.get('web_apps', []))
+        analyzed = 0
+        
         for app in self.data.get('web_apps', []):
             url = app['url']
+            analyzed += 1
+            
+            # show progress
+            print(f"\r[*] Analyzing apps: {analyzed}/{total_apps}", end='', flush=True)
             
             try:
                 r = requests.get(url, timeout=10, verify=False)
@@ -345,13 +367,21 @@ Live Hosts:
             except Exception as e:
                 pass
         
+        print()  # newline after progress
         self.log("Tech detection complete", "success")
         
         # crawl for endpoints
         self.log("Crawling for endpoints...", "info")
         
+        crawled = 0
+        total_crawl = len(self.data.get('web_apps', []))
+        
         for app in self.data.get('web_apps', []):
             url = app['url']
+            crawled += 1
+            
+            # show crawling progress
+            print(f"\r[*] Crawling: {crawled}/{total_crawl} ({len(self.endpoints)} endpoints)", end='', flush=True)
             
             try:
                 r = requests.get(url, timeout=10, verify=False)
@@ -368,6 +398,7 @@ Live Hosts:
             except:
                 pass
         
+        print()  # newline
         self.endpoints = list(set(self.endpoints))[:100]  # limit to first 100
         
         self.log(f"Found {len(self.endpoints)} endpoints", "success")
