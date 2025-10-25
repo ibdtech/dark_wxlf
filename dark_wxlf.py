@@ -115,7 +115,7 @@ All Subdomains:
             try:
                 self.log("Starting amass passive mode...", "info")
                 r = subprocess.run(
-                    f"amass enum -d {self.target} -passive -timeout 3",
+                    f"amass enum -d {self.target} -passive",
                     shell=True, capture_output=True, text=True, timeout=180
                 )
                 if r.stdout:
@@ -210,7 +210,13 @@ Live Hosts:
     def check_live(self):
         self.log("Checking which hosts are actually live...", "info")
         
+        # set dns timeout so we don't wait forever
+        socket.setdefaulttimeout(3)
+        
         cnt = 0
+        total = len(self.subdomains)
+        checked = 0
+        
         with ThreadPoolExecutor(max_workers=50) as ex:
             def check(sub):
                 try:
@@ -223,25 +229,36 @@ Live Hosts:
             
             for job in as_completed(jobs):
                 res = job.result()
+                checked += 1
+                
+                # show progress so user knows we're not stuck
+                print(f"\r[*] Checking hosts: {checked}/{total} ({len(self.live)} live)", end='', flush=True)
+                
                 if res:
                     self.live.append(res)
                     cnt += 1
         
+        print()  # newline after progress bar
         self.log(f"Found {len(self.live)} live hosts", "success")
     
     def find_webapps(self):
         self.log("Looking for web applications...", "info")
         
         apps = []
+        total = len(self.live)
+        done = 0
+        
         with ThreadPoolExecutor(max_workers=30) as ex:
             def probe(host):
                 sub = host['sub']
                 results = []
                 
+                # try both http and https
                 for scheme in ['https', 'http']:
                     try:
                         url = f"{scheme}://{sub}"
-                        r = requests.get(url, timeout=5, allow_redirects=True, verify=False)
+                        # reduced timeout from 5s to 3s - faster and still catches everything
+                        r = requests.get(url, timeout=3, allow_redirects=True, verify=False)
                         
                         if r.status_code < 500:
                             results.append({
@@ -260,9 +277,15 @@ Live Hosts:
             
             for job in as_completed(jobs):
                 res = job.result()
+                done += 1
+                
+                # show progress - let user know it's working
+                print(f"\r[*] Probing web apps: {done}/{total} ({len(apps)} found)", end='', flush=True)
+                
                 if res:
                     apps.extend(res)
         
+        print()  # newline
         self.data['web_apps'] = apps
         self.log(f"Found {len(apps)} web applications", "success")
     
@@ -375,7 +398,7 @@ Live Hosts:
                 r = requests.get(
                     url + "?id=1'OR'1'='1",
                     headers={'User-Agent': 'sqlmap/1.0'},
-                    timeout=5,
+                    timeout=3,
                     verify=False
                 )
                 
@@ -790,9 +813,14 @@ Live Hosts:
         print()
         
         findings = []
+        test_num = 0
+        total_tests = len(selected_tests)
         
         # run each selected test
         for test in selected_tests:
+            test_num += 1
+            print(f"\n[*] Running test {test_num}/{total_tests}: {test['name']}")
+            
             try:
                 results = test['func']()
                 findings.extend(results)
@@ -807,6 +835,7 @@ Live Hosts:
         
         self.vulns = findings
         
+        print()
         self.log(f"Testing complete: {len(findings)} vulnerabilities found", "success")
         
         self.make_report(findings)
@@ -855,7 +884,7 @@ Live Hosts:
                         base = ep.split('?')[0]
                         test_url = f"{base}?{param}={payload}"
                         
-                        r = requests.get(test_url, timeout=5, verify=False)
+                        r = requests.get(test_url, timeout=3, verify=False)
                         
                         # check if reflected
                         if payload in r.text:
@@ -949,7 +978,7 @@ Live Hosts:
                         base = ep.split('?')[0]
                         test_url = f"{base}?{param}={payload}"
                         
-                        r = requests.get(test_url, timeout=5, verify=False)
+                        r = requests.get(test_url, timeout=3, verify=False)
                         
                         for err in sql_errors:
                             if err in r.text.lower():
@@ -1162,7 +1191,7 @@ Live Hosts:
                     url + '/api/test',
                     data=xxe_payload,
                     headers={'Content-Type': 'application/xml'},
-                    timeout=5,
+                    timeout=3,
                     verify=False
                 )
                 
@@ -1194,7 +1223,7 @@ Live Hosts:
                         test,
                         data=xxe_payload,
                         headers={'Content-Type': 'text/xml'},
-                        timeout=5,
+                        timeout=3,
                         verify=False
                     )
                     
@@ -1411,7 +1440,7 @@ Live Hosts:
                             base = ep.split('?')[0]
                             test_url = f"{base}?{param}={payload}"
                             
-                            r = requests.get(test_url, timeout=5, verify=False)
+                            r = requests.get(test_url, timeout=3, verify=False)
                             
                             # check for linux file signatures
                             linux_sigs = ['root:', 'daemon:', 'bin/bash', 'sbin/nologin', '/home/']
@@ -1484,7 +1513,7 @@ Live Hosts:
             for file in sensitive:
                 try:
                     test = f"{url}/{file}"
-                    r = requests.get(test, timeout=5, verify=False)
+                    r = requests.get(test, timeout=3, verify=False)
                     
                     # check if file exists and has content
                     if r.status_code == 200 and len(r.text) > 10:
@@ -1523,7 +1552,7 @@ Live Hosts:
                 r = requests.get(
                     url,
                     headers={'Origin': 'https://evil.com'},
-                    timeout=5,
+                    timeout=3,
                     verify=False
                 )
                 
@@ -1579,7 +1608,7 @@ Live Hosts:
             missing = []
             
             try:
-                r = requests.get(url, timeout=5, verify=False)
+                r = requests.get(url, timeout=3, verify=False)
                 headers = r.headers
                 
                 # check critical security headers
@@ -1688,7 +1717,7 @@ Live Hosts:
                         base = ep.split('?')[0]
                         test_url = f"{base}?{param}={payload}"
                         
-                        r = requests.get(test_url, timeout=5, verify=False, allow_redirects=False)
+                        r = requests.get(test_url, timeout=3, verify=False, allow_redirects=False)
                         
                         # check if we injected headers
                         if 'Set-Cookie' in r.headers and 'test=evil' in r.headers.get('Set-Cookie', ''):
@@ -1733,7 +1762,7 @@ Live Hosts:
                         test_url,
                         data=intro_query,
                         headers={'Content-Type': 'application/json'},
-                        timeout=5,
+                        timeout=3,
                         verify=False
                     )
                     
@@ -1769,7 +1798,7 @@ Live Hosts:
             
             try:
                 # try to get a JWT token
-                r = requests.get(url, timeout=5, verify=False)
+                r = requests.get(url, timeout=3, verify=False)
                 
                 # look for JWT in headers or cookies
                 auth = r.headers.get('Authorization', '')
@@ -1849,7 +1878,7 @@ Live Hosts:
                             test_r = requests.get(
                                 url,
                                 headers={'Authorization': f'Bearer {none_token}'},
-                                timeout=5,
+                                timeout=3,
                                 verify=False
                             )
                             
@@ -1954,7 +1983,7 @@ Live Hosts:
                 # try to fetch the site
                 for scheme in ['https', 'http']:
                     try:
-                        r = requests.get(f"{scheme}://{sub}", timeout=5, verify=False)
+                        r = requests.get(f"{scheme}://{sub}", timeout=3, verify=False)
                         
                         # check for takeover signatures
                         for service, sig in takeover_sigs.items():
@@ -2042,7 +2071,7 @@ Live Hosts:
                         base = ep.split('?')[0]
                         test_url = f"{base}?{param}={payload}"
                         
-                        r = requests.get(test_url, timeout=5, verify=False)
+                        r = requests.get(test_url, timeout=3, verify=False)
                         
                         # check if 49 appears but payload doesn't (means it evaluated)
                         if '49' in r.text and payload not in r.text:
@@ -2078,7 +2107,7 @@ Live Hosts:
                         rce_payload = "{{config.__class__.__init__.__globals__['os'].popen('id').read()}}"
                         try:
                             test_url = f"{base}?{param}={rce_payload}"
-                            r2 = requests.get(test_url, timeout=5, verify=False)
+                            r2 = requests.get(test_url, timeout=3, verify=False)
                             
                             if 'uid=' in r2.text or 'gid=' in r2.text:
                                 vuln2 = {
@@ -2104,7 +2133,7 @@ Live Hosts:
                         rce_payload = '<#assign ex="freemarker.template.utility.Execute"?new()> ${ ex("id") }'
                         try:
                             test_url = f"{base}?{param}={rce_payload}"
-                            r2 = requests.get(test_url, timeout=5, verify=False)
+                            r2 = requests.get(test_url, timeout=3, verify=False)
                             
                             if 'uid=' in r2.text:
                                 vuln2 = {
@@ -2143,7 +2172,7 @@ Live Hosts:
                 r = requests.get(
                     url,
                     headers={'Host': 'evil.com'},
-                    timeout=5,
+                    timeout=3,
                     verify=False,
                     allow_redirects=False
                 )
@@ -2192,7 +2221,7 @@ Live Hosts:
                     r = requests.get(
                         url + path,
                         headers=headers,
-                        timeout=5,
+                        timeout=3,
                         verify=False
                     )
                     
