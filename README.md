@@ -571,7 +571,7 @@ bug bounty hunting is competitive. automation helps you find bugs faster. this t
 
 use it as a starting point. customize it for your workflow. add your own tests. make it yours.
 
-good luck and happy hunting 🐺
+good luck and happy hunting 
 
 ---
 
@@ -584,6 +584,4 @@ good luck and happy hunting 🐺
 - $0 cost
 - 100% open source
 
-**github:** https://github.com/yourusername/dark-wxlf
-
-**made with 💀 by GhxstSh3ll**
+**github:** https://github.com/ibdtech/dark_wxlf
