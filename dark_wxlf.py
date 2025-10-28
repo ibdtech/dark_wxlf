@@ -32,7 +32,18 @@ class DarkWxlf:
         self.fuzzed_paths = []
         self.use_nuclei = False
         self.use_fuzzing = False
-        self.output_formats = ['txt']  # default text output
+        self.output_formats = ['txt']
+        
+        # bug bounty safe mode
+        self.bug_bounty_mode = False
+        self.rate_limit_enabled = False
+        self.max_requests_per_second = 10
+        self.request_delay = 0.1
+        self.last_request_time = 0
+        self.total_requests = 0
+        self.in_scope = []
+        self.out_of_scope = []
+        self.scope_enabled = False
         
     def show_banner(self):
         os.system('clear')
@@ -59,6 +70,78 @@ class DarkWxlf:
             print(colored(f"\n{'='*75}", 'red'))
             print(colored(f"[PHASE] {msg}", 'red', attrs=['bold']))
             print(colored(f"{'='*75}\n", 'red'))
+    
+    def enforce_rate_limit(self):
+        if not self.rate_limit_enabled:
+            return
+        
+        current_time = time.time()
+        time_since_last = current_time - self.last_request_time
+        
+        if time_since_last < self.request_delay:
+            time.sleep(self.request_delay - time_since_last)
+        
+        self.last_request_time = time.time()
+        self.total_requests += 1
+    
+    def check_scope(self, url):
+        if not self.scope_enabled:
+            return True
+        
+        for scope_item in self.in_scope:
+            if scope_item in url:
+                for out_item in self.out_of_scope:
+                    if out_item in url:
+                        return False
+                return True
+        return False
+    
+    def enable_bug_bounty_mode(self):
+        self.bug_bounty_mode = True
+        self.rate_limit_enabled = True
+        self.scope_enabled = True
+        print(colored("[*] Bug Bounty Safe Mode ENABLED", 'green', attrs=['bold']))
+        print(colored(f"    Rate limit: {self.max_requests_per_second} requests/second", 'green'))
+        print(colored("    Scope filtering: ACTIVE", 'green'))
+        print()
+    
+    def safe_request(self, method='get', url='', **kwargs):
+        if self.scope_enabled and not self.check_scope(url):
+            return None
+        
+        self.enforce_rate_limit()
+        
+        try:
+            if method.lower() == 'get':
+                return requests.get(url, **kwargs)
+            elif method.lower() == 'post':
+                return requests.post(url, **kwargs)
+            elif method.lower() == 'put':
+                return requests.put(url, **kwargs)
+            elif method.lower() == 'delete':
+                return requests.delete(url, **kwargs)
+        except Exception as e:
+            return None
+    
+    def toggle_rate_limit(self, enabled=None):
+        if enabled is None:
+            self.rate_limit_enabled = not self.rate_limit_enabled
+        else:
+            self.rate_limit_enabled = enabled
+        
+        status = "ENABLED" if self.rate_limit_enabled else "DISABLED"
+        print(colored(f"[*] Rate limiting {status}", 'yellow'))
+        if self.rate_limit_enabled:
+            print(colored(f"    Max: {self.max_requests_per_second} requests/second", 'yellow'))
+    
+    def set_rate_limit(self, max_rps):
+        if max_rps <= 0:
+            print(colored("[!] Rate limit must be positive", 'red'))
+            return
+        
+        self.max_requests_per_second = max_rps
+        self.request_delay = 1.0 / max_rps
+        print(colored(f"[*] Rate limit set to {max_rps} requests/second", 'green'))
     
     def save_output(self, section, content):
         if not self.output:
@@ -3106,6 +3189,40 @@ https://github.com/projectdiscovery/nuclei-templates
         print(colored("║                   TARGET SELECTION                             ║", 'red', attrs=['bold']))
         print(colored("╚═══════════════════════════════════════════════════════════════╝\n", 'red'))
         
+        safe_mode = input(colored("[?] Enable Bug Bounty Safe Mode? (y/n): ", 'yellow')).lower()
+        if safe_mode == 'y':
+            print()
+            rate_input = input(colored("[?] Max requests per second (10-50, default 10): ", 'cyan'))
+            if rate_input.isdigit():
+                rate = max(10, min(int(rate_input), 50))
+                self.max_requests_per_second = rate
+                self.request_delay = 1.0 / rate
+            
+            print()
+            print(colored("[*] Configure scope (one domain per line, empty to finish)", 'cyan'))
+            print(colored("    Example: *.example.com or api.example.com", 'white'))
+            print()
+            
+            while True:
+                scope_input = input(colored("    In-scope domain: ", 'green')).strip()
+                if not scope_input:
+                    break
+                self.in_scope.append(scope_input)
+                print(colored(f"    Added: {scope_input}", 'green'))
+            
+            if self.in_scope:
+                print()
+                print(colored("[*] Out-of-scope domains (optional)", 'cyan'))
+                while True:
+                    out_input = input(colored("    Out-of-scope domain: ", 'red')).strip()
+                    if not out_input:
+                        break
+                    self.out_of_scope.append(out_input)
+                    print(colored(f"    Excluded: {out_input}", 'red'))
+            
+            self.enable_bug_bounty_mode()
+            print()
+        
         tgt = input(colored("[?] Enter target domain (e.g., example.com): ", 'yellow'))
         
         if not tgt:
@@ -3143,6 +3260,10 @@ https://github.com/projectdiscovery/nuclei-templates
         self.test_vulns()
         
         self.log(f"\nAll data saved to: {self.output}", "success")
+        
+        if self.bug_bounty_mode:
+            print(colored(f"\n[*] Total requests sent: {self.total_requests}", 'yellow'))
+        
         print(colored("\n╔═══════════════════════════════════════════════════════════════╗", 'red'))
         print(colored("║                      SCAN COMPLETE                             ║", 'red', attrs=['bold']))
         print(colored("╚═══════════════════════════════════════════════════════════════╝\n", 'red'))
