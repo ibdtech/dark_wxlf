@@ -57,7 +57,7 @@ plus 1000+ more checks if you install nuclei
 
 ```bash
 # clone it
-git clone https://github.com/yourusername/dark-wxlf.git
+git clone https://github.com/ibdtech/dark-wxlf.git
 cd dark-wxlf
 
 # install python stuff
