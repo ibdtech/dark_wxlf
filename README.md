@@ -57,8 +57,8 @@ plus 1000+ more checks if you install nuclei
 
 ```bash
 # clone it
-git clone https://github.com/ibdtech/dark-wxlf.git
-cd dark-wxlf
+git clone https://github.com/ibdtech/dark_wxlf.git
+cd dark_wxlf
 
 # install python stuff
 pip install requests termcolor pyfiglet aiohttp
